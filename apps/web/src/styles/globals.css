@@ -1,0 +1,156 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --eden-primary: #1aad5c;
+    --eden-dark: #042818;
+    --eden-light: #edfcf2;
+    --eden-glow: rgba(26, 173, 92, 0.3);
+    --soil-warm: #b37d3e;
+    --sky-accent: #3b9cf6;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-eden-950 text-gray-100 font-sans;
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(26, 173, 92, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 100%, rgba(59, 156, 246, 0.04) 0%, transparent 50%);
+    min-height: 100vh;
+  }
+
+  ::selection {
+    @apply bg-eden-500/30 text-white;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-eden-800 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-eden-700;
+  }
+}
+
+@layer components {
+  .card-glass {
+    @apply bg-white/[0.03] backdrop-blur-xl border border-white/[0.06] rounded-2xl;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.02) inset,
+      0 4px 24px rgba(0,0,0,0.3);
+  }
+
+  .card-glass-hover {
+    @apply card-glass transition-all duration-300;
+  }
+  .card-glass-hover:hover {
+    @apply border-eden-500/20 bg-white/[0.05];
+    box-shadow:
+      0 0 0 1px rgba(26,173,92,0.1) inset,
+      0 8px 40px rgba(0,0,0,0.4),
+      0 0 40px rgba(26,173,92,0.05);
+  }
+
+  .btn-primary {
+    @apply px-6 py-3 bg-gradient-to-r from-eden-500 to-eden-600 text-white font-medium rounded-xl
+           hover:from-eden-400 hover:to-eden-500 transition-all duration-200
+           shadow-lg shadow-eden-500/20 hover:shadow-eden-500/30
+           active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 bg-white/[0.05] text-gray-200 font-medium rounded-xl border border-white/[0.08]
+           hover:bg-white/[0.08] hover:text-white transition-all duration-200
+           active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 text-gray-400 hover:text-white hover:bg-white/[0.05] rounded-lg transition-all duration-200;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl
+           text-white placeholder-gray-500 font-sans
+           focus:outline-none focus:border-eden-500/50 focus:ring-1 focus:ring-eden-500/20
+           transition-all duration-200;
+  }
+
+  .badge-type {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium;
+  }
+
+  .badge-land {
+    @apply badge-type bg-eden-500/15 text-eden-400 border border-eden-500/20;
+  }
+
+  .badge-resource {
+    @apply badge-type bg-sky-500/15 text-sky-400 border border-sky-500/20;
+  }
+
+  .badge-service {
+    @apply badge-type bg-purple-500/15 text-purple-400 border border-purple-500/20;
+  }
+
+  .badge-verified {
+    @apply badge-type bg-eden-500/15 text-eden-400;
+  }
+
+  .section-title {
+    @apply text-3xl md:text-4xl font-display text-white;
+  }
+
+  .section-subtitle {
+    @apply text-gray-400 text-lg max-w-2xl;
+  }
+
+  .trust-score {
+    @apply inline-flex items-center gap-1 text-sm font-medium;
+  }
+
+  .node-pulse {
+    animation: nodePulse 2s ease-in-out infinite;
+  }
+
+  @keyframes nodePulse {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.2); }
+  }
+
+  /* Mapbox overrides */
+  .mapboxgl-popup-content {
+    @apply bg-eden-950/95 backdrop-blur-xl rounded-xl border border-white/10 p-0 shadow-2xl !important;
+    color: white !important;
+  }
+  .mapboxgl-popup-tip {
+    border-top-color: rgba(4, 40, 24, 0.95) !important;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .gradient-text {
+    @apply bg-gradient-to-r from-eden-400 via-eden-300 to-sky-400 bg-clip-text text-transparent;
+  }
+}

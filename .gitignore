@@ -1,0 +1,12 @@
+node_modules/
+.next/
+.env
+.env.local
+.env.*.local
+dist/
+*.tsbuildinfo
+.turbo
+.vercel
+prisma/migrations/
+*.db
+*.sqlite
