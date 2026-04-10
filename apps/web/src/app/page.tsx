@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
-  ArrowRight, MapPin, Users, Leaf, Shield, Star, Zap,
+  ArrowRight, MapPin, Users, Leaf, Shield, Star, Zap, X,
   Globe as GlobeIcon, MessageSquare, CheckCircle, Heart,
   TreePine, Sprout, HandHeart, TrendingUp, Award
 } from 'lucide-react';

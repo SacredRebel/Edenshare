@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import './styles/globals.css';
+import '../styles/globals.css';
 import Navbar from './components/shared/Navbar';
 import { Toaster } from 'react-hot-toast';
 
