@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useMemo, useState } from 'react';
+import React, { useRef, useMemo, useState, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Stars, Html, useTexture } from '@react-three/drei';
 import * as THREE from 'three';
@@ -78,19 +78,25 @@ function InnerGlow() {
 // ─── CONNECTION ARCS ────────────────────────────────────────────────────────
 
 function ConnectionArc({ from, to, color }: { from: THREE.Vector3; to: THREE.Vector3; color: string }) {
-  const geometry = useMemo(() => {
+  const lineRef = useRef<THREE.Group>(null);
+
+  useEffect(() => {
+    if (!lineRef.current) return;
     const mid = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
     mid.normalize().multiplyScalar(1 + from.distanceTo(to) * 0.3);
-    const c = new THREE.QuadraticBezierCurve3(from, mid, to);
-    return new THREE.BufferGeometry().setFromPoints(c.getPoints(48));
-  }, [from, to]);
+    const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
+    const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(48));
+    const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.18 });
+    const line = new THREE.Line(geometry, material);
+    lineRef.current.add(line);
+    return () => {
+      lineRef.current?.remove(line);
+      geometry.dispose();
+      material.dispose();
+    };
+  }, [from, to, color]);
 
-  return (
-    // @ts-ignore - r3f line element
-    <line geometry={geometry}>
-      <lineBasicMaterial color={color} transparent opacity={0.18} />
-    </line>
-  );
+  return <group ref={lineRef} />;
 }
 
 function NetworkArcs() {
@@ -167,7 +173,7 @@ function NodeMarker({ node, isSelected, onSelect }: { node: NodeType; isSelected
 
 // ─── EARTH ──────────────────────────────────────────────────────────────────
 
-function Earth({ selectedNode, onSelect }: { selectedNode: NodeType | null; onSelect: (n: NodeType | null) => void }) {
+function EarthWithTextures({ selectedNode, onSelect }: { selectedNode: NodeType | null; onSelect: (n: NodeType | null) => void }) {
   const earthRef = useRef<THREE.Group>(null);
   const cloudsRef = useRef<THREE.Mesh>(null);
 
@@ -198,6 +204,19 @@ function Earth({ selectedNode, onSelect }: { selectedNode: NodeType | null; onSe
       <NetworkArcs />
       {NODES.map((node) => <NodeMarker key={node.id} node={node} isSelected={selectedNode?.id === node.id} onSelect={onSelect} />)}
     </group>
+  );
+}
+
+function Earth({ selectedNode, onSelect }: { selectedNode: NodeType | null; onSelect: (n: NodeType | null) => void }) {
+  return (
+    <React.Suspense fallback={
+      <mesh>
+        <sphereGeometry args={[1, 64, 64]} />
+        <meshPhongMaterial color="#1a3a2a" emissive="#0a1f14" emissiveIntensity={0.15} shininess={15} />
+      </mesh>
+    }>
+      <EarthWithTextures selectedNode={selectedNode} onSelect={onSelect} />
+    </React.Suspense>
   );
 }
 
