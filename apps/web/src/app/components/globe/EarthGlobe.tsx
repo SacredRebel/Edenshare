@@ -1,12 +1,10 @@
 "use client";
 
-import React, { useRef, useMemo, useState, useEffect } from 'react';
+import React, { useRef, useMemo, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Stars, Html, useTexture } from '@react-three/drei';
+import { OrbitControls, Stars, Html, Sphere, Ring } from '@react-three/drei';
 import * as THREE from 'three';
 import { MapPin, Users, Leaf, Star, Shield, X, Wrench, ExternalLink } from 'lucide-react';
-
-// ─── DATA ───────────────────────────────────────────────────────────────────
 
 const NODES = [
   { id: '1', name: 'Permaculture Oasis', lat: 34.05, lng: -118.24, type: 'land' as const, members: 156, rating: 4.8, online: true, desc: 'Established food forest in Southern California seeking seasonal collaborators.', verified: true },
@@ -26,141 +24,85 @@ const NODES = [
 type NodeType = typeof NODES[0];
 
 const TYPE_COLORS: Record<string, string> = { land: '#3ec878', resource: '#60b9fa', community: '#c084fc', service: '#fbbf24' };
-const TYPE_HEX: Record<string, number> = { land: 0x3ec878, resource: 0x60b9fa, community: 0xc084fc, service: 0xfbbf24 };
 
 function latLngToVec3(lat: number, lng: number, r = 1.005): THREE.Vector3 {
   const phi = (90 - lat) * (Math.PI / 180);
   const theta = (lng + 180) * (Math.PI / 180);
-  return new THREE.Vector3(-(r * Math.sin(phi) * Math.cos(theta)), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(theta));
+  return new THREE.Vector3(
+    -(r * Math.sin(phi) * Math.cos(theta)),
+    r * Math.cos(phi),
+    r * Math.sin(phi) * Math.sin(theta),
+  );
 }
 
-// ─── ATMOSPHERE ─────────────────────────────────────────────────────────────
-
-const ATMO_VERT = `
-  varying vec3 vNormal;
-  void main() {
-    vNormal = normalize(normalMatrix * normal);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-function Atmosphere() {
-  const mat = useMemo(() => new THREE.ShaderMaterial({
-    vertexShader: ATMO_VERT,
-    fragmentShader: `
-      varying vec3 vNormal;
-      void main() {
-        float intensity = pow(0.72 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.2);
-        vec3 col = mix(vec3(0.15, 0.75, 0.45), vec3(0.2, 0.6, 0.95), intensity);
-        gl_FragColor = vec4(col, intensity * 0.6);
-      }
-    `,
-    blending: THREE.AdditiveBlending, side: THREE.BackSide, transparent: true, depthWrite: false,
-  }), []);
-  return <mesh scale={1.18}><sphereGeometry args={[1, 64, 64]} /><primitive object={mat} attach="material" /></mesh>;
-}
-
-function InnerGlow() {
-  const mat = useMemo(() => new THREE.ShaderMaterial({
-    vertexShader: ATMO_VERT,
-    fragmentShader: `
-      varying vec3 vNormal;
-      void main() {
-        float i = pow(0.55 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 1.8);
-        gl_FragColor = vec4(0.15, 0.8, 0.5, i * 0.25);
-      }
-    `,
-    blending: THREE.AdditiveBlending, side: THREE.FrontSide, transparent: true, depthWrite: false,
-  }), []);
-  return <mesh scale={1.006}><sphereGeometry args={[1, 64, 64]} /><primitive object={mat} attach="material" /></mesh>;
-}
-
-// ─── CONNECTION ARCS ────────────────────────────────────────────────────────
-
-function ConnectionArc({ from, to, color }: { from: THREE.Vector3; to: THREE.Vector3; color: string }) {
-  const lineRef = useRef<THREE.Group>(null);
-
-  useEffect(() => {
-    if (!lineRef.current) return;
-    const mid = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
-    mid.normalize().multiplyScalar(1 + from.distanceTo(to) * 0.3);
-    const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
-    const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(48));
-    const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.18 });
-    const line = new THREE.Line(geometry, material);
-    lineRef.current.add(line);
-    return () => {
-      lineRef.current?.remove(line);
-      geometry.dispose();
-      material.dispose();
-    };
-  }, [from, to, color]);
-
-  return <group ref={lineRef} />;
-}
-
-function NetworkArcs() {
-  const arcs = useMemo(() => {
-    const pairs = [[0,1],[1,5],[2,8],[3,9],[4,7],[5,8],[6,11],[0,10],[9,7],[2,5]];
-    return pairs.map(([a,b]) => ({
-      from: latLngToVec3(NODES[a].lat, NODES[a].lng, 1.006),
-      to: latLngToVec3(NODES[b].lat, NODES[b].lng, 1.006),
-      color: TYPE_COLORS[NODES[a].type],
-    }));
-  }, []);
-  return <>{arcs.map((a,i) => <ConnectionArc key={i} {...a} />)}</>;
-}
-
-// ─── NODE MARKER ────────────────────────────────────────────────────────────
+// ─── NODE ───────────────────────────────────────────────────────────────────
 
 function NodeMarker({ node, isSelected, onSelect }: { node: NodeType; isSelected: boolean; onSelect: (n: NodeType | null) => void }) {
   const pos = useMemo(() => latLngToVec3(node.lat, node.lng), [node.lat, node.lng]);
   const col = TYPE_COLORS[node.type];
-  const ringRef = useRef<THREE.Mesh>(null);
-  const ring2Ref = useRef<THREE.Mesh>(null);
   const dotRef = useRef<THREE.Mesh>(null);
+  const ringRef = useRef<THREE.Mesh>(null);
 
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
     const off = node.lat * 0.1 + node.lng * 0.05;
-    if (dotRef.current) dotRef.current.scale.setScalar(isSelected ? 2.2 : 1 + Math.sin(t * 2.5 + off) * 0.2);
-    if (ringRef.current) {
-      ringRef.current.scale.setScalar(1 + Math.sin(t * 1.8 + off) * 0.4);
-      (ringRef.current.material as THREE.MeshBasicMaterial).opacity = (0.35 - Math.sin(t * 1.8 + off) * 0.15) * (node.online ? 1 : 0.3);
+    if (dotRef.current) {
+      dotRef.current.scale.setScalar(isSelected ? 2.5 : 1 + Math.sin(t * 2.5 + off) * 0.25);
     }
-    if (ring2Ref.current) {
-      ring2Ref.current.scale.setScalar(1.5 + Math.sin(t * 1.2 + off + 1) * 0.5);
-      (ring2Ref.current.material as THREE.MeshBasicMaterial).opacity = (0.12 - Math.sin(t * 1.2 + off + 1) * 0.06) * (node.online ? 1 : 0.2);
+    if (ringRef.current) {
+      const s = 1 + Math.sin(t * 1.5 + off) * 0.4;
+      ringRef.current.scale.setScalar(s);
+      (ringRef.current.material as THREE.MeshBasicMaterial).opacity =
+        (0.4 - Math.sin(t * 1.5 + off) * 0.2) * (node.online ? 1 : 0.3);
     }
   });
 
   return (
     <group position={pos}>
-      <mesh ref={ring2Ref}><ringGeometry args={[0.028, 0.033, 32]} /><meshBasicMaterial color={col} transparent opacity={0.1} side={THREE.DoubleSide} depthWrite={false} /></mesh>
-      <mesh ref={ringRef}><ringGeometry args={[0.02, 0.027, 32]} /><meshBasicMaterial color={col} transparent opacity={0.3} side={THREE.DoubleSide} depthWrite={false} /></mesh>
-      <mesh ref={dotRef}
+      {/* Pulse ring */}
+      <mesh ref={ringRef} rotation={[0, 0, 0]}>
+        <ringGeometry args={[0.022, 0.03, 32]} />
+        <meshBasicMaterial color={col} transparent opacity={0.3} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+
+      {/* Core dot */}
+      <mesh
+        ref={dotRef}
         onClick={(e) => { e.stopPropagation(); onSelect(isSelected ? null : node); }}
         onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }}
         onPointerOut={() => { document.body.style.cursor = 'default'; }}
       >
-        <sphereGeometry args={[0.012, 20, 20]} />
-        <meshStandardMaterial color={col} emissive={col} emissiveIntensity={node.online ? 1.5 : 0.3} toneMapped={false} />
+        <sphereGeometry args={[0.013, 16, 16]} />
+        <meshStandardMaterial
+          color={col}
+          emissive={col}
+          emissiveIntensity={node.online ? 1.5 : 0.3}
+          toneMapped={false}
+        />
       </mesh>
-      <sprite scale={[0.08, 0.08, 1]}>
-        <spriteMaterial color={TYPE_HEX[node.type]} transparent opacity={node.online ? 0.2 : 0.05} depthWrite={false} blending={THREE.AdditiveBlending} />
+
+      {/* Glow sprite */}
+      <sprite scale={[0.09, 0.09, 1]}>
+        <spriteMaterial color={col} transparent opacity={node.online ? 0.15 : 0.04} depthWrite={false} blending={THREE.AdditiveBlending} />
       </sprite>
+
+      {/* Tooltip */}
       {isSelected && (
         <Html distanceFactor={2.5} center style={{ pointerEvents: 'none', transform: 'translate(0, -60px)' }}>
           <div className="bg-eden-950/95 backdrop-blur-2xl text-white rounded-2xl border border-white/[0.08] shadow-2xl min-w-[240px] overflow-hidden">
             <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${col}, transparent)` }} />
             <div className="p-4">
-              <div className="flex items-center gap-2 mb-1"><span className="font-semibold text-sm">{node.name}</span>{node.verified && <Shield className="w-3.5 h-3.5 text-eden-400" />}</div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-semibold text-sm">{node.name}</span>
+                {node.verified && <Shield className="w-3.5 h-3.5 text-eden-400" />}
+              </div>
               <p className="text-xs text-gray-400 leading-relaxed mb-3">{node.desc}</p>
               <div className="flex items-center gap-3 text-[11px] text-gray-500">
                 <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {node.members}</span>
                 <span className="flex items-center gap-1"><Star className="w-3 h-3 fill-eden-400 text-eden-400" /> {node.rating}</span>
                 <span className={`flex items-center gap-1 ${node.online ? 'text-eden-400' : 'text-gray-600'}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${node.online ? 'bg-eden-400' : 'bg-gray-600'}`} /> {node.online ? 'Online' : 'Offline'}
+                  <span className={`w-1.5 h-1.5 rounded-full ${node.online ? 'bg-eden-400' : 'bg-gray-600'}`} />
+                  {node.online ? 'Online' : 'Offline'}
                 </span>
               </div>
             </div>
@@ -173,74 +115,114 @@ function NodeMarker({ node, isSelected, onSelect }: { node: NodeType; isSelected
 
 // ─── EARTH ──────────────────────────────────────────────────────────────────
 
-function EarthWithTextures({ selectedNode, onSelect }: { selectedNode: NodeType | null; onSelect: (n: NodeType | null) => void }) {
-  const earthRef = useRef<THREE.Group>(null);
-  const cloudsRef = useRef<THREE.Mesh>(null);
-
-  const [earthMap, bumpMap, specMap, cloudsMap] = useTexture([
-    'https://unpkg.com/three-globe@2.31.1/example/img/earth-blue-marble.jpg',
-    'https://unpkg.com/three-globe@2.31.1/example/img/earth-topology.png',
-    'https://unpkg.com/three-globe@2.31.1/example/img/earth-water.png',
-    'https://unpkg.com/three-globe@2.31.1/example/img/earth-clouds.png',
-  ]);
+function EarthSphere({ selectedNode, onSelect }: { selectedNode: NodeType | null; onSelect: (n: NodeType | null) => void }) {
+  const groupRef = useRef<THREE.Group>(null);
 
   useFrame(({ clock }) => {
-    if (earthRef.current && !selectedNode) earthRef.current.rotation.y = clock.elapsedTime * 0.02;
-    if (cloudsRef.current) cloudsRef.current.rotation.y = clock.elapsedTime * 0.008;
+    if (groupRef.current && !selectedNode) {
+      groupRef.current.rotation.y = clock.elapsedTime * 0.02;
+    }
   });
 
   return (
-    <group ref={earthRef}>
+    <group ref={groupRef}>
+      {/* Core earth */}
       <mesh onClick={() => onSelect(null)}>
         <sphereGeometry args={[1, 64, 64]} />
-        <meshPhongMaterial map={earthMap} bumpMap={bumpMap} bumpScale={0.012} specularMap={specMap} specular={new THREE.Color(0x444444)} shininess={20} />
+        <meshStandardMaterial
+          color="#143d28"
+          roughness={0.85}
+          metalness={0.05}
+        />
       </mesh>
-      <mesh ref={cloudsRef}>
-        <sphereGeometry args={[1.008, 64, 64]} />
-        <meshPhongMaterial map={cloudsMap} transparent opacity={0.15} depthWrite={false} side={THREE.DoubleSide} />
+
+      {/* Ocean layer */}
+      <mesh>
+        <sphereGeometry args={[1.001, 64, 64]} />
+        <meshStandardMaterial
+          color="#0c2d4a"
+          transparent
+          opacity={0.4}
+          roughness={0.3}
+          metalness={0.2}
+        />
       </mesh>
-      <Atmosphere />
-      <InnerGlow />
-      <NetworkArcs />
-      {NODES.map((node) => <NodeMarker key={node.id} node={node} isSelected={selectedNode?.id === node.id} onSelect={onSelect} />)}
+
+      {/* Subtle latitude lines */}
+      <mesh>
+        <sphereGeometry args={[1.003, 72, 36]} />
+        <meshBasicMaterial color="#4ade80" wireframe transparent opacity={0.04} />
+      </mesh>
+
+      {/* Atmosphere inner glow */}
+      <mesh scale={1.02}>
+        <sphereGeometry args={[1, 64, 64]} />
+        <meshBasicMaterial color="#22c55e" transparent opacity={0.03} />
+      </mesh>
+
+      {/* Atmosphere outer glow */}
+      <mesh scale={1.12}>
+        <sphereGeometry args={[1, 48, 48]} />
+        <meshBasicMaterial color="#4ade80" transparent opacity={0.06} side={THREE.BackSide} />
+      </mesh>
+
+      {/* Second atmosphere ring */}
+      <mesh scale={1.2}>
+        <sphereGeometry args={[1, 32, 32]} />
+        <meshBasicMaterial color="#22d3ee" transparent opacity={0.025} side={THREE.BackSide} />
+      </mesh>
+
+      {/* Nodes */}
+      {NODES.map((node) => (
+        <NodeMarker
+          key={node.id}
+          node={node}
+          isSelected={selectedNode?.id === node.id}
+          onSelect={onSelect}
+        />
+      ))}
     </group>
   );
 }
 
-function Earth({ selectedNode, onSelect }: { selectedNode: NodeType | null; onSelect: (n: NodeType | null) => void }) {
-  return (
-    <React.Suspense fallback={
-      <mesh>
-        <sphereGeometry args={[1, 64, 64]} />
-        <meshPhongMaterial color="#1a3a2a" emissive="#0a1f14" emissiveIntensity={0.15} shininess={15} />
-      </mesh>
-    }>
-      <EarthWithTextures selectedNode={selectedNode} onSelect={onSelect} />
-    </React.Suspense>
-  );
-}
-
-// ─── EXPORT ─────────────────────────────────────────────────────────────────
+// ─── MAIN ───────────────────────────────────────────────────────────────────
 
 export default function EarthGlobe() {
   const [selectedNode, setSelectedNode] = useState<NodeType | null>(null);
 
   return (
     <div className="w-full h-full relative rounded-2xl overflow-hidden">
-      {/* Cinematic vignette */}
-      <div className="absolute inset-0 pointer-events-none z-10" style={{ background: 'radial-gradient(ellipse at center, transparent 50%, rgba(4,40,24,0.6) 100%)' }} />
+      {/* Vignette */}
+      <div
+        className="absolute inset-0 pointer-events-none z-10"
+        style={{ background: 'radial-gradient(ellipse at center, transparent 50%, rgba(4,40,24,0.6) 100%)' }}
+      />
 
       <Canvas
         camera={{ position: [0, 0.3, 2.8], fov: 40 }}
-        gl={{ antialias: true, alpha: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}
+        gl={{ antialias: true, alpha: true }}
         dpr={[1, 2]}
       >
-        <ambientLight intensity={0.12} />
-        <directionalLight position={[5, 3, 4]} intensity={1.8} color="#fff8f0" />
-        <directionalLight position={[-3, -1, -4]} intensity={0.12} color="#4ade80" />
-        <Stars radius={200} depth={100} count={4000} factor={3} saturation={0.2} fade speed={0.3} />
-        <Earth selectedNode={selectedNode} onSelect={setSelectedNode} />
-        <OrbitControls enablePan={false} enableZoom minDistance={1.4} maxDistance={4.5} autoRotate={!selectedNode} autoRotateSpeed={0.25} enableDamping dampingFactor={0.04} rotateSpeed={0.5} />
+        <ambientLight intensity={0.3} />
+        <directionalLight position={[5, 3, 4]} intensity={1.5} color="#fff8f0" />
+        <directionalLight position={[-3, -1, -4]} intensity={0.2} color="#4ade80" />
+        <pointLight position={[0, 4, 0]} intensity={0.15} color="#60b9fa" />
+
+        <Stars radius={200} depth={100} count={3000} factor={3} saturation={0.2} fade speed={0.3} />
+
+        <EarthSphere selectedNode={selectedNode} onSelect={setSelectedNode} />
+
+        <OrbitControls
+          enablePan={false}
+          enableZoom
+          minDistance={1.4}
+          maxDistance={4.5}
+          autoRotate={!selectedNode}
+          autoRotateSpeed={0.25}
+          enableDamping
+          dampingFactor={0.04}
+          rotateSpeed={0.5}
+        />
       </Canvas>
 
       {/* Legend */}
@@ -278,22 +260,36 @@ export default function EarthGlobe() {
           <div className="bg-eden-950/90 backdrop-blur-2xl rounded-2xl border border-white/[0.08] overflow-hidden shadow-2xl shadow-black/40">
             <div className="h-1" style={{ background: `linear-gradient(90deg, ${TYPE_COLORS[selectedNode.type]}, transparent)` }} />
             <div className="p-5 relative">
-              <button onClick={() => setSelectedNode(null)} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"><X className="w-4 h-4" /></button>
-              <span className="text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded-full inline-block mb-2"
-                style={{ backgroundColor: `${TYPE_COLORS[selectedNode.type]}18`, color: TYPE_COLORS[selectedNode.type], border: `1px solid ${TYPE_COLORS[selectedNode.type]}30` }}>
+              <button onClick={() => setSelectedNode(null)} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+              <span
+                className="text-[10px] uppercase tracking-wider font-medium px-2 py-0.5 rounded-full inline-block mb-2"
+                style={{
+                  backgroundColor: `${TYPE_COLORS[selectedNode.type]}18`,
+                  color: TYPE_COLORS[selectedNode.type],
+                  border: `1px solid ${TYPE_COLORS[selectedNode.type]}30`,
+                }}
+              >
                 {selectedNode.type}
               </span>
-              <h3 className="text-white font-semibold text-lg flex items-center gap-2">{selectedNode.name}{selectedNode.verified && <Shield className="w-4 h-4 text-eden-400" />}</h3>
+              <h3 className="text-white font-semibold text-lg flex items-center gap-2">
+                {selectedNode.name}
+                {selectedNode.verified && <Shield className="w-4 h-4 text-eden-400" />}
+              </h3>
               <p className="text-gray-400 text-sm mt-2 leading-relaxed">{selectedNode.desc}</p>
               <div className="flex items-center gap-4 mt-4 text-sm text-gray-500">
                 <span className="flex items-center gap-1.5"><Users className="w-4 h-4" /> {selectedNode.members}</span>
                 <span className="flex items-center gap-1.5"><Star className="w-4 h-4 text-eden-400 fill-eden-400" /> {selectedNode.rating}</span>
                 <span className={`flex items-center gap-1.5 ${selectedNode.online ? 'text-eden-400' : ''}`}>
-                  <span className={`w-2 h-2 rounded-full ${selectedNode.online ? 'bg-eden-400' : 'bg-gray-600'}`} />{selectedNode.online ? 'Online' : 'Offline'}
+                  <span className={`w-2 h-2 rounded-full ${selectedNode.online ? 'bg-eden-400' : 'bg-gray-600'}`} />
+                  {selectedNode.online ? 'Online' : 'Offline'}
                 </span>
               </div>
               <div className="flex gap-2 mt-5">
-                <button className="btn-primary text-sm flex-1 flex items-center justify-center gap-1.5 py-2.5">View Details <ExternalLink className="w-3.5 h-3.5" /></button>
+                <button className="btn-primary text-sm flex-1 flex items-center justify-center gap-1.5 py-2.5">
+                  View Details <ExternalLink className="w-3.5 h-3.5" />
+                </button>
                 <button className="btn-secondary text-sm py-2.5 px-4">Message</button>
               </div>
             </div>
