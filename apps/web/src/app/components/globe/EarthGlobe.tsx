@@ -78,25 +78,17 @@ function InnerGlow() {
 // ─── CONNECTION ARCS ────────────────────────────────────────────────────────
 
 function ConnectionArc({ from, to, color }: { from: THREE.Vector3; to: THREE.Vector3; color: string }) {
-  const { curve, geometry } = useMemo(() => {
+  const geometry = useMemo(() => {
     const mid = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
     mid.normalize().multiplyScalar(1 + from.distanceTo(to) * 0.3);
     const c = new THREE.QuadraticBezierCurve3(from, mid, to);
-    const pts = c.getPoints(48);
-    return { curve: c, geometry: new THREE.BufferGeometry().setFromPoints(pts) };
+    return new THREE.BufferGeometry().setFromPoints(c.getPoints(48));
   }, [from, to]);
 
-  const ref = useRef<THREE.Line>(null);
-  useFrame((_, dt) => {
-    if (ref.current) {
-      const mat = ref.current.material as any;
-      mat.dashOffset = (mat.dashOffset || 0) - dt * 0.3;
-    }
-  });
-
   return (
-    <line ref={ref as any} geometry={geometry} computeLineDistances>
-      <lineDashedMaterial color={color} transparent opacity={0.2} dashSize={0.03} gapSize={0.02} />
+    // @ts-ignore - r3f line element
+    <line geometry={geometry}>
+      <lineBasicMaterial color={color} transparent opacity={0.18} />
     </line>
   );
 }
