@@ -89,7 +89,7 @@ function ConnectionArc({ from, to, color }: { from: THREE.Vector3; to: THREE.Vec
   const ref = useRef<THREE.Line>(null);
   useFrame((_, dt) => {
     if (ref.current) {
-      const mat = ref.current.material as THREE.LineDashedMaterial;
+      const mat = ref.current.material as any;
       mat.dashOffset = (mat.dashOffset || 0) - dt * 0.3;
     }
   });
