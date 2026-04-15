@@ -1,30 +1,130 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Search, Send, ArrowLeft, Shield, MapPin, Paperclip, MoreVertical, Phone, Video, CheckCheck } from 'lucide-react';
-
-const CONVERSATIONS = [
-  { id: '1', name: 'Sarah M.', lastMsg: 'Sure, you can arrive on April 5th! I\'ll prepare the barn studio.', time: '2h ago', unread: 2, online: true, verified: true, listing: '5-Acre Permaculture Farm' },
-  { id: '2', name: 'Marcus T.', lastMsg: 'Thanks for the tools! I\'ll return the tiller on Friday.', time: '5h ago', unread: 0, online: true, verified: true, listing: 'Tool Library Access' },
-  { id: '3', name: 'Elena K.', lastMsg: 'Would love to discuss the eco-village expansion plans.', time: '1d ago', unread: 0, online: false, verified: true, listing: null },
-  { id: '4', name: 'James W.', lastMsg: 'The permaculture design for your plot is ready for review.', time: '2d ago', unread: 1, online: false, verified: false, listing: 'Design Consultation' },
-];
-
-const MESSAGES = [
-  { id: '1', sender: 'them', content: 'Hi! I saw your listing for the permaculture farm. I\'m very interested in the work-exchange program.', time: '10:23 AM', read: true },
-  { id: '2', sender: 'me', content: 'Hello! Thanks for reaching out. Tell me a bit about yourself and your experience with farming.', time: '10:45 AM', read: true },
-  { id: '3', sender: 'them', content: 'I\'ve been doing urban gardening for 3 years in Brooklyn, and I completed a PDC last year. I\'m looking to get hands-on experience with food forests.', time: '11:02 AM', read: true },
-  { id: '4', sender: 'me', content: 'That sounds great! We have a lot of food forest work planned for April-May. Would you be available for a 4-week stay?', time: '11:15 AM', read: true },
-  { id: '5', sender: 'them', content: 'Absolutely! I can be there from April 5th through May 3rd. What should I bring?', time: '11:30 AM', read: true },
-  { id: '6', sender: 'me', content: 'Perfect timing. Bring work clothes, rain gear, and any personal tools you like. We provide everything else. I\'ll send you the address and arrival details.', time: '11:48 AM', read: true },
-  { id: '7', sender: 'them', content: 'Sure, you can arrive on April 5th! I\'ll prepare the barn studio.', time: '12:01 PM', read: false },
-];
+import { Search, Send, ArrowLeft, Shield, Paperclip, MoreVertical, CheckCheck } from 'lucide-react';
+import { useAuth } from '@/lib/auth-context';
+import { supabase } from '@/lib/supabase';
 
 export default function MessagesPage() {
-  const [selectedConvo, setSelectedConvo] = useState(CONVERSATIONS[0]);
-  const [message, setMessage] = useState('');
+  const { user, loading: authLoading } = useAuth();
+  const router = useRouter();
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [selectedConvo, setSelectedConvo] = useState<any>(null);
+  const [messages, setMessages] = useState<any[]>([]);
+  const [newMessage, setNewMessage] = useState('');
   const [showList, setShowList] = useState(true);
+  const [loadingConvos, setLoadingConvos] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!authLoading && !user) { router.push('/login'); return; }
+    if (!user) return;
+    fetchConversations();
+  }, [user, authLoading]);
+
+  const fetchConversations = async () => {
+    if (!user) return;
+    // Get conversations the user participates in
+    const { data: parts } = await supabase
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('user_id', user.id);
+
+    if (!parts || parts.length === 0) { setLoadingConvos(false); return; }
+
+    const convoIds = parts.map(p => p.conversation_id);
+    const { data: convos } = await supabase
+      .from('conversations')
+      .select('*')
+      .in('id', convoIds)
+      .order('last_message_at', { ascending: false });
+
+    // For each conversation, get the other participant and last message
+    const enriched = await Promise.all((convos || []).map(async (c) => {
+      const { data: participants } = await supabase
+        .from('conversation_participants')
+        .select('user_id, profiles(display_name, avatar_url)')
+        .eq('conversation_id', c.id)
+        .neq('user_id', user.id);
+
+      const { data: lastMsg } = await supabase
+        .from('messages')
+        .select('content, created_at, sender_id')
+        .eq('conversation_id', c.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      const other = participants?.[0]?.profiles as any;
+      return { ...c, other_user: other, last_message: lastMsg };
+    }));
+
+    setConversations(enriched);
+    setLoadingConvos(false);
+  };
+
+  const selectConversation = async (convo: any) => {
+    setSelectedConvo(convo);
+    setShowList(false);
+
+    // Fetch messages
+    const { data } = await supabase
+      .from('messages')
+      .select('*, profiles!messages_sender_id_fkey(display_name, avatar_url)')
+      .eq('conversation_id', convo.id)
+      .order('created_at', { ascending: true });
+
+    setMessages(data || []);
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+  };
+
+  // Realtime subscription
+  useEffect(() => {
+    if (!selectedConvo) return;
+
+    const channel = supabase
+      .channel(`messages:${selectedConvo.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${selectedConvo.id}`,
+      }, async (payload) => {
+        // Fetch full message with profile
+        const { data } = await supabase
+          .from('messages')
+          .select('*, profiles!messages_sender_id_fkey(display_name, avatar_url)')
+          .eq('id', payload.new.id)
+          .single();
+        if (data) {
+          setMessages(prev => [...prev, data]);
+          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [selectedConvo]);
+
+  const sendMessage = async () => {
+    if (!newMessage.trim() || !user || !selectedConvo) return;
+    const content = newMessage.trim();
+    setNewMessage('');
+
+    await supabase.from('messages').insert({
+      conversation_id: selectedConvo.id,
+      sender_id: user.id,
+      content,
+    });
+
+    // Update conversation last_message_at
+    await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', selectedConvo.id);
+  };
+
+  if (authLoading) return <div className="min-h-screen pt-16 flex items-center justify-center"><div className="w-8 h-8 border-2 border-eden-500/30 border-t-eden-500 rounded-full animate-spin" /></div>;
+  if (!user) return null;
 
   return (
     <div className="h-screen pt-16 flex">
@@ -38,117 +138,76 @@ export default function MessagesPage() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {CONVERSATIONS.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => { setSelectedConvo(c); setShowList(false); }}
-              className={`w-full p-4 flex items-start gap-3 hover:bg-white/[0.03] transition-colors text-left ${
-                selectedConvo?.id === c.id ? 'bg-white/[0.04] border-l-2 border-eden-500' : ''
-              }`}
-            >
-              <div className="relative flex-shrink-0">
-                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-eden-400/20 to-sky-400/20 flex items-center justify-center text-sm font-bold text-white">
-                  {c.name.split(' ').map(n => n[0]).join('')}
+          {loadingConvos ? (
+            <div className="flex justify-center py-8"><div className="w-6 h-6 border-2 border-eden-500/30 border-t-eden-500 rounded-full animate-spin" /></div>
+          ) : conversations.length > 0 ? (
+            conversations.map(c => (
+              <button key={c.id} onClick={() => selectConversation(c)}
+                className={`w-full p-4 flex items-start gap-3 hover:bg-white/[0.03] transition-colors text-left ${selectedConvo?.id === c.id ? 'bg-white/[0.04] border-l-2 border-eden-500' : ''}`}>
+                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-eden-400/20 to-sky-400/20 flex items-center justify-center text-sm font-bold text-white flex-shrink-0 overflow-hidden">
+                  {c.other_user?.avatar_url ? <img src={c.other_user.avatar_url} alt="" className="w-full h-full object-cover" /> : (c.other_user?.display_name || '?')[0]}
                 </div>
-                {c.online && <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-eden-500 rounded-full border-2 border-eden-950" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-sm font-medium text-white flex items-center gap-1">
-                    {c.name} {c.verified && <Shield className="w-3 h-3 text-eden-400" />}
-                  </span>
-                  <span className="text-[10px] text-gray-500">{c.time}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-sm font-medium text-white truncate">{c.other_user?.display_name || 'User'}</span>
+                    <span className="text-[10px] text-gray-500">{c.last_message?.created_at ? new Date(c.last_message.created_at).toLocaleDateString() : ''}</span>
+                  </div>
+                  {c.title && <div className="text-[10px] text-eden-400/60 mb-0.5">Re: {c.title}</div>}
+                  <p className="text-xs text-gray-500 truncate">{c.last_message?.content || 'No messages yet'}</p>
                 </div>
-                {c.listing && <div className="text-[10px] text-eden-400/60 mb-0.5">Re: {c.listing}</div>}
-                <p className="text-xs text-gray-500 truncate">{c.lastMsg}</p>
-              </div>
-              {c.unread > 0 && (
-                <span className="w-5 h-5 bg-eden-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center flex-shrink-0 mt-1">
-                  {c.unread}
-                </span>
-              )}
-            </button>
-          ))}
+              </button>
+            ))
+          ) : (
+            <div className="px-6 py-12 text-center text-gray-500 text-sm">
+              No conversations yet. Send a message from a listing to start chatting.
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Chat View */}
+      {/* Chat */}
       <div className={`flex-1 flex flex-col ${!selectedConvo || showList ? 'hidden md:flex' : 'flex'}`}>
         {selectedConvo ? (
           <>
-            {/* Chat Header */}
             <div className="px-4 py-3 border-b border-white/[0.04] flex items-center gap-3 bg-eden-950/50">
-              <button onClick={() => setShowList(true)} className="md:hidden p-1 text-gray-400">
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-eden-400/20 to-sky-400/20 flex items-center justify-center text-sm font-bold text-white">
-                {selectedConvo.name.split(' ').map(n => n[0]).join('')}
+              <button onClick={() => setShowList(true)} className="md:hidden p-1 text-gray-400"><ArrowLeft className="w-5 h-5" /></button>
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-eden-400/20 to-sky-400/20 flex items-center justify-center text-sm font-bold text-white overflow-hidden">
+                {selectedConvo.other_user?.avatar_url ? <img src={selectedConvo.other_user.avatar_url} alt="" className="w-full h-full object-cover" /> : (selectedConvo.other_user?.display_name || '?')[0]}
               </div>
               <div className="flex-1">
-                <div className="text-sm font-medium text-white flex items-center gap-1">
-                  {selectedConvo.name} {selectedConvo.verified && <Shield className="w-3 h-3 text-eden-400" />}
-                </div>
-                <div className="text-[10px] text-gray-500">{selectedConvo.online ? 'Online' : 'Last seen recently'}</div>
-              </div>
-              <div className="flex items-center gap-1">
-                <button className="btn-ghost p-2"><Phone className="w-4 h-4" /></button>
-                <button className="btn-ghost p-2"><Video className="w-4 h-4" /></button>
-                <button className="btn-ghost p-2"><MoreVertical className="w-4 h-4" /></button>
+                <div className="text-sm font-medium text-white">{selectedConvo.other_user?.display_name || 'User'}</div>
+                {selectedConvo.title && <div className="text-[10px] text-gray-500">{selectedConvo.title}</div>}
               </div>
             </div>
 
-            {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {selectedConvo.listing && (
-                <div className="mx-auto card-glass px-4 py-2 text-xs text-gray-500 flex items-center gap-2 w-fit">
-                  <MapPin className="w-3 h-3 text-eden-400" />
-                  Conversation about: <span className="text-eden-400">{selectedConvo.listing}</span>
-                </div>
-              )}
-              {MESSAGES.map((msg) => (
-                <motion.div
-                  key={msg.id}
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}
-                >
+              {messages.map(msg => (
+                <div key={msg.id} className={`flex ${msg.sender_id === user.id ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                    msg.sender === 'me'
-                      ? 'bg-eden-600/80 text-white rounded-br-md'
-                      : 'bg-white/[0.06] text-gray-200 rounded-bl-md'
+                    msg.sender_id === user.id ? 'bg-eden-600/80 text-white rounded-br-md' : 'bg-white/[0.06] text-gray-200 rounded-bl-md'
                   }`}>
                     <p>{msg.content}</p>
-                    <div className={`flex items-center gap-1 mt-1 text-[10px] ${msg.sender === 'me' ? 'text-eden-200/60 justify-end' : 'text-gray-500'}`}>
-                      {msg.time}
-                      {msg.sender === 'me' && <CheckCheck className={`w-3 h-3 ${msg.read ? 'text-eden-300' : 'text-eden-200/40'}`} />}
+                    <div className={`text-[10px] mt-1 ${msg.sender_id === user.id ? 'text-eden-200/60 text-right' : 'text-gray-500'}`}>
+                      {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>
                   </div>
-                </motion.div>
+                </div>
               ))}
+              <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
             <div className="p-4 border-t border-white/[0.04] bg-eden-950/50">
               <div className="flex items-center gap-2">
-                <button className="btn-ghost p-2.5"><Paperclip className="w-5 h-5" /></button>
-                <input
-                  type="text"
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Type a message..."
-                  className="input-field flex-1 py-2.5"
-                  onKeyDown={(e) => e.key === 'Enter' && setMessage('')}
-                />
-                <button className="w-10 h-10 rounded-xl bg-eden-500 text-white flex items-center justify-center hover:bg-eden-400 transition-colors">
+                <input type="text" value={newMessage} onChange={e => setNewMessage(e.target.value)} placeholder="Type a message..."
+                  className="input-field flex-1 py-2.5" onKeyDown={e => e.key === 'Enter' && sendMessage()} />
+                <button onClick={sendMessage} disabled={!newMessage.trim()} className="w-10 h-10 rounded-xl bg-eden-500 text-white flex items-center justify-center hover:bg-eden-400 transition-colors disabled:opacity-30">
                   <Send className="w-4 h-4" />
                 </button>
               </div>
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-gray-500">
-            Select a conversation to start messaging
-          </div>
+          <div className="flex-1 flex items-center justify-center text-gray-500">Select a conversation</div>
         )}
       </div>
     </div>
