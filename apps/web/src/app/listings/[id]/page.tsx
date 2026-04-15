@@ -1,278 +1,471 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
   MapPin, Users, Star, Shield, Heart, Share2, ArrowLeft, Clock,
   CheckCircle, Droplets, Zap, Car, Leaf, Calendar, MessageSquare,
-  ChevronRight, Flag, TreePine, Sun, Wind
+  ChevronRight, Flag, TreePine, Sun, Wrench, Send, X, Eye, User, ExternalLink
 } from 'lucide-react';
+import { useAuth } from '@/lib/auth-context';
+import { supabase } from '@/lib/supabase';
 
-const LISTING = {
-  id: '1',
-  title: '5-Acre Permaculture Farm',
-  type: 'LAND',
-  description: 'Beautiful established permaculture farm with food forest, pond, and multiple growing zones. We are seeking seasonal collaborators for work-exchange programs running April through October.',
-  longDescription: `This 5-acre property has been under permaculture management for over 12 years. It features a mature food forest with over 40 species of fruit and nut trees, a natural swimming pond fed by a year-round spring, extensive herb gardens, composting infrastructure, and a small greenhouse.
-
-We welcome collaborators who are interested in learning regenerative agriculture practices. In exchange for 20 hours per week of farm work, we provide private accommodation in a renovated barn studio, access to all farm produce, and mentorship in permaculture design.
-
-The property is located 15 minutes from downtown Ojai, with access to hiking trails, farmers markets, and a vibrant local community. We have reliable water, solar electricity, and high-speed internet.`,
-  location: 'Ojai, California',
-  latitude: 34.45,
-  longitude: -119.24,
-  acreage: 5.0,
-  soilType: 'Sandy loam',
-  waterAccess: true,
-  electricityAccess: true,
-  roadAccess: true,
-  climate: 'Mediterranean',
-  exchangeType: 'WORK_EXCHANGE',
-  availableFrom: '2026-04-01',
-  availableTo: '2026-10-31',
-  tags: ['permaculture', 'food forest', 'work-exchange', 'organic', 'regenerative'],
-  viewCount: 1247,
-  images: [
-    { url: '/placeholder1.jpg', caption: 'Main food forest area' },
-    { url: '/placeholder2.jpg', caption: 'Natural swimming pond' },
-    { url: '/placeholder3.jpg', caption: 'Barn studio accommodation' },
-    { url: '/placeholder4.jpg', caption: 'Herb spiral garden' },
-  ],
-  community: { name: 'LA Regenerators', members: 156, slug: 'la-regenerators' },
-  creator: {
-    name: 'Sarah M.',
-    avatarUrl: null,
-    trustScore: 4.8,
-    responseRate: 98,
-    responseTime: 2,
-    verified: true,
-    badges: ['VERIFIED_ID', 'SUPER_HOST', 'TRUSTED_HOST'],
-    reviewCount: 23,
-    joinedYear: 2023,
-  },
-};
-
-const REVIEWS = [
-  { author: 'Marcus T.', rating: 5, comment: 'An incredible experience. Sarah is a wonderful host and the farm is even more beautiful than described. I learned so much about food forests.', date: '2 months ago', verified: true },
-  { author: 'Elena K.', rating: 5, comment: 'The accommodation is clean and private, the work expectations are clear, and the food from the garden is amazing. Highly recommend.', date: '4 months ago', verified: true },
-  { author: 'James W.', rating: 4, comment: 'Great experience overall. The location is a bit remote if you don\'t have a car, but the farm itself is a paradise.', date: '6 months ago', verified: false },
-];
+const TYPE_ICONS: Record<string, any> = { land: MapPin, resource: Leaf, service: Wrench };
 
 export default function ListingDetailPage() {
+  const { id } = useParams();
+  const { user } = useAuth();
+  const router = useRouter();
+  const [listing, setListing] = useState<any>(null);
+  const [creator, setCreator] = useState<any>(null);
+  const [reviews, setReviews] = useState<any[]>([]);
   const [saved, setSaved] = useState(false);
-  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [showRequest, setShowRequest] = useState(false);
+  const [requestMsg, setRequestMsg] = useState('');
+  const [sendingRequest, setSendingRequest] = useState(false);
+  const [requestSent, setRequestSent] = useState(false);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState('');
+  const [sendingReview, setSendingReview] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [reportMsg, setReportMsg] = useState('');
+
+  useEffect(() => {
+    if (!id) return;
+    fetchListing();
+  }, [id]);
+
+  const fetchListing = async () => {
+    // Fetch listing
+    const { data: l } = await supabase
+      .from('listings')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (!l) { setLoading(false); return; }
+    setListing(l);
+
+    // Increment view count
+    await supabase.from('listings').update({ view_count: (l.view_count || 0) + 1 }).eq('id', id);
+
+    // Fetch creator profile
+    const { data: p } = await supabase.from('profiles').select('*').eq('id', l.creator_id).single();
+    setCreator(p);
+
+    // Fetch reviews
+    const { data: r } = await supabase
+      .from('reviews')
+      .select('*, profiles!reviews_author_id_fkey(display_name, avatar_url)')
+      .eq('listing_id', id)
+      .order('created_at', { ascending: false });
+    setReviews(r || []);
+
+    // Check if saved
+    if (user) {
+      const { data: s } = await supabase.from('saved_listings').select('id').eq('user_id', user.id).eq('listing_id', id as string).single();
+      setSaved(!!s);
+    }
+
+    // Check if already requested
+    if (user) {
+      const { data: req } = await supabase.from('requests').select('id').eq('listing_id', id as string).eq('requester_id', user.id).single();
+      if (req) setRequestSent(true);
+    }
+
+    setLoading(false);
+  };
+
+  const toggleSave = async () => {
+    if (!user || !listing) return;
+    if (saved) {
+      await supabase.from('saved_listings').delete().eq('user_id', user.id).eq('listing_id', listing.id);
+    } else {
+      await supabase.from('saved_listings').insert({ user_id: user.id, listing_id: listing.id });
+    }
+    setSaved(!saved);
+  };
+
+  const sendRequest = async () => {
+    if (!user || !listing) return;
+    setSendingRequest(true);
+
+    // Create request
+    const { data: req } = await supabase.from('requests').insert({
+      listing_id: listing.id,
+      requester_id: user.id,
+      message: requestMsg,
+      status: 'pending',
+    }).select().single();
+
+    // Create conversation
+    const { data: convo } = await supabase.from('conversations').insert({
+      request_id: req?.id,
+      title: listing.title,
+      last_message_at: new Date().toISOString(),
+    }).select().single();
+
+    if (convo) {
+      // Add both participants
+      await supabase.from('conversation_participants').insert([
+        { conversation_id: convo.id, user_id: user.id },
+        { conversation_id: convo.id, user_id: listing.creator_id },
+      ]);
+
+      // Send initial message
+      if (requestMsg) {
+        await supabase.from('messages').insert({
+          conversation_id: convo.id,
+          sender_id: user.id,
+          content: requestMsg,
+          type: 'text',
+        });
+      }
+
+      // System message
+      await supabase.from('messages').insert({
+        conversation_id: convo.id,
+        sender_id: user.id,
+        content: `Request sent for "${listing.title}"`,
+        type: 'system',
+      });
+
+      // Notification to host
+      await supabase.from('notifications').insert({
+        user_id: listing.creator_id,
+        type: 'request_received',
+        title: 'New request received',
+        body: `${user.email} sent a request for "${listing.title}"`,
+        action_url: `/messages`,
+      });
+    }
+
+    setRequestSent(true);
+    setShowRequest(false);
+    setSendingRequest(false);
+  };
+
+  const messageHost = async () => {
+    if (!user || !listing) return;
+
+    // Check if conversation already exists
+    const { data: existingParts } = await supabase
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('user_id', user.id);
+
+    if (existingParts) {
+      for (const p of existingParts) {
+        const { data: otherPart } = await supabase
+          .from('conversation_participants')
+          .select('user_id')
+          .eq('conversation_id', p.conversation_id)
+          .eq('user_id', listing.creator_id)
+          .single();
+        if (otherPart) {
+          router.push('/messages');
+          return;
+        }
+      }
+    }
+
+    // Create new conversation
+    const { data: convo } = await supabase.from('conversations').insert({
+      title: listing.title,
+      last_message_at: new Date().toISOString(),
+    }).select().single();
+
+    if (convo) {
+      await supabase.from('conversation_participants').insert([
+        { conversation_id: convo.id, user_id: user.id },
+        { conversation_id: convo.id, user_id: listing.creator_id },
+      ]);
+    }
+
+    router.push('/messages');
+  };
+
+  const submitReview = async () => {
+    if (!user || !listing) return;
+    setSendingReview(true);
+    await supabase.from('reviews').insert({
+      listing_id: listing.id,
+      author_id: user.id,
+      subject_id: listing.creator_id,
+      rating: reviewRating,
+      comment: reviewComment,
+    });
+    setShowReviewForm(false);
+    setReviewComment('');
+    fetchListing(); // Refresh reviews
+    setSendingReview(false);
+  };
+
+  const submitReport = async () => {
+    if (!user || !listing || !reportMsg) return;
+    await supabase.from('reports').insert({
+      reporter_id: user.id,
+      reported_listing_id: listing.id,
+      type: 'listing',
+      reason: 'inappropriate',
+      message: reportMsg,
+    });
+    setShowReport(false);
+    setReportMsg('');
+  };
+
+  if (loading) return <div className="min-h-screen pt-16 flex items-center justify-center"><div className="w-8 h-8 border-2 border-eden-500/30 border-t-eden-500 rounded-full animate-spin" /></div>;
+  if (!listing) return <div className="min-h-screen pt-16 flex items-center justify-center"><p className="text-gray-500">Listing not found</p></div>;
+
+  const avgRating = reviews.length > 0 ? (reviews.reduce((a, r) => a + r.rating, 0) / reviews.length).toFixed(1) : null;
+  const TypeIcon = TYPE_ICONS[listing.type] || MapPin;
+  const isOwner = user?.id === listing.creator_id;
 
   return (
     <div className="min-h-screen pt-16">
       <div className="container mx-auto px-4 py-6">
-        {/* Back */}
-        <Link href="/listings" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-white mb-6 transition-colors">
-          <ArrowLeft className="w-4 h-4" /> Back to Listings
-        </Link>
+        <Link href="/listings" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-white mb-6"><ArrowLeft className="w-4 h-4" /> Back to Listings</Link>
 
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Main Content */}
+          {/* Main */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Image Gallery */}
-            <div className="grid grid-cols-2 gap-2 rounded-2xl overflow-hidden h-80">
-              <div className="bg-gradient-to-br from-eden-800/40 to-eden-900/40 flex items-center justify-center">
-                <TreePine className="w-16 h-16 text-eden-600/40" />
-              </div>
-              <div className="grid grid-rows-2 gap-2">
-                <div className="bg-gradient-to-br from-sky-800/30 to-sky-900/30 flex items-center justify-center">
-                  <Droplets className="w-10 h-10 text-sky-600/40" />
-                </div>
-                <div className="bg-gradient-to-br from-soil-800/30 to-soil-900/30 flex items-center justify-center relative">
-                  <Sun className="w-10 h-10 text-soil-600/40" />
-                  <button className="absolute bottom-2 right-2 text-xs bg-white/10 backdrop-blur px-3 py-1 rounded-lg text-white">
-                    +{LISTING.images.length - 3} more
-                  </button>
+            {/* Images */}
+            {listing.images && listing.images.length > 0 ? (
+              <div className="grid grid-cols-2 gap-2 rounded-2xl overflow-hidden h-80">
+                <img src={listing.images[0]} alt="" className="w-full h-full object-cover" />
+                <div className="grid grid-rows-2 gap-2">
+                  {listing.images[1] && <img src={listing.images[1]} alt="" className="w-full h-full object-cover" />}
+                  {listing.images[2] ? (
+                    <div className="relative"><img src={listing.images[2]} alt="" className="w-full h-full object-cover" />
+                      {listing.images.length > 3 && <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white font-bold">+{listing.images.length - 3}</div>}
+                    </div>
+                  ) : <div className="bg-eden-900/30" />}
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="h-48 rounded-2xl bg-gradient-to-br from-eden-800/30 to-eden-900/30 flex items-center justify-center">
+                <TypeIcon className="w-16 h-16 text-eden-600/30" />
+              </div>
+            )}
 
-            {/* Title & Meta */}
+            {/* Title */}
             <div>
               <div className="flex items-center gap-3 mb-3">
-                <span className="badge-land"><MapPin className="w-3 h-3" /> LAND</span>
-                <span className="badge-type bg-amber-500/15 text-amber-400 border border-amber-500/20">
-                  <Leaf className="w-3 h-3" /> Work Exchange
+                <span className={`badge-${listing.type === 'land' ? 'land' : listing.type === 'resource' ? 'resource' : 'service'}`}>
+                  <TypeIcon className="w-3 h-3" /> {listing.type}
                 </span>
+                {listing.exchange_type && (
+                  <span className="badge-type bg-amber-500/15 text-amber-400 border border-amber-500/20 capitalize">{listing.exchange_type.replace('_', ' ')}</span>
+                )}
               </div>
-              <h1 className="text-3xl font-display text-white mb-2">{LISTING.title}</h1>
+              <h1 className="text-3xl font-display text-white mb-2">{listing.title}</h1>
               <div className="flex items-center gap-4 text-sm text-gray-500">
-                <span className="flex items-center gap-1"><MapPin className="w-4 h-4" /> {LISTING.location}</span>
-                <span className="flex items-center gap-1"><TreePine className="w-4 h-4" /> {LISTING.acreage} acres</span>
-                <span className="flex items-center gap-1"><Calendar className="w-4 h-4" /> Apr – Oct 2026</span>
+                {listing.city && <span className="flex items-center gap-1"><MapPin className="w-4 h-4" /> {listing.city}{listing.region ? `, ${listing.region}` : ''}</span>}
+                {listing.acreage && <span className="flex items-center gap-1"><TreePine className="w-4 h-4" /> {listing.acreage} acres</span>}
+                <span className="flex items-center gap-1"><Eye className="w-4 h-4" /> {listing.view_count} views</span>
               </div>
             </div>
 
             {/* Description */}
             <div className="card-glass p-6">
               <h2 className="text-lg font-semibold text-white mb-3">About This Listing</h2>
-              <div className="text-gray-400 leading-relaxed whitespace-pre-line text-sm">
-                {LISTING.longDescription}
-              </div>
+              <div className="text-gray-400 leading-relaxed whitespace-pre-line text-sm">{listing.long_description || listing.description || 'No description provided.'}</div>
             </div>
 
-            {/* Land Details */}
-            <div className="card-glass p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">Land Details</h2>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {[
-                  { icon: TreePine, label: 'Acreage', value: `${LISTING.acreage} acres` },
-                  { icon: Leaf, label: 'Soil Type', value: LISTING.soilType },
-                  { icon: Sun, label: 'Climate', value: LISTING.climate },
-                  { icon: Droplets, label: 'Water Access', value: LISTING.waterAccess ? 'Yes — Spring fed' : 'No' },
-                  { icon: Zap, label: 'Electricity', value: LISTING.electricityAccess ? 'Yes — Solar' : 'No' },
-                  { icon: Car, label: 'Road Access', value: LISTING.roadAccess ? 'Yes — Paved' : 'No' },
-                ].map((d) => (
-                  <div key={d.label} className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0">
-                      <d.icon className="w-4 h-4 text-eden-400" />
+            {/* Land details */}
+            {listing.type === 'land' && (
+              <div className="card-glass p-6">
+                <h2 className="text-lg font-semibold text-white mb-4">Land Details</h2>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {[
+                    listing.acreage && { icon: TreePine, label: 'Acreage', value: `${listing.acreage} acres` },
+                    listing.soil_type && { icon: Leaf, label: 'Soil Type', value: listing.soil_type },
+                    listing.climate && { icon: Sun, label: 'Climate', value: listing.climate },
+                    { icon: Droplets, label: 'Water', value: listing.water_access ? 'Yes' : 'No' },
+                    { icon: Zap, label: 'Electricity', value: listing.electricity_access ? 'Yes' : 'No' },
+                    { icon: Car, label: 'Road Access', value: listing.road_access ? 'Yes' : 'No' },
+                  ].filter(Boolean).map((d: any) => (
+                    <div key={d.label} className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0"><d.icon className="w-4 h-4 text-eden-400" /></div>
+                      <div><div className="text-xs text-gray-500">{d.label}</div><div className="text-sm text-white">{d.value}</div></div>
                     </div>
-                    <div>
-                      <div className="text-xs text-gray-500">{d.label}</div>
-                      <div className="text-sm text-white">{d.value}</div>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Tags */}
-            <div className="flex flex-wrap gap-2">
-              {LISTING.tags.map((tag) => (
-                <span key={tag} className="text-xs px-3 py-1.5 bg-white/[0.04] text-gray-400 rounded-lg border border-white/[0.06]">
-                  {tag}
-                </span>
-              ))}
-            </div>
+            {listing.tags?.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {listing.tags.map((tag: string) => (
+                  <span key={tag} className="text-xs px-3 py-1.5 bg-white/[0.04] text-gray-400 rounded-lg border border-white/[0.06]">{tag}</span>
+                ))}
+              </div>
+            )}
 
             {/* Reviews */}
             <div className="card-glass p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <Star className="w-5 h-5 text-eden-400 fill-eden-400" />
-                  {LISTING.creator.trustScore} · {LISTING.creator.reviewCount} Reviews
+                  {avgRating && <><Star className="w-5 h-5 text-eden-400 fill-eden-400" /> {avgRating} ·</>} {reviews.length} Reviews
                 </h2>
+                {user && !isOwner && (
+                  <button onClick={() => setShowReviewForm(!showReviewForm)} className="text-sm text-eden-400 hover:text-eden-300">Write a Review</button>
+                )}
               </div>
-              <div className="space-y-5">
-                {REVIEWS.map((r, i) => (
-                  <div key={i} className={`${i > 0 ? 'pt-5 border-t border-white/[0.04]' : ''}`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-eden-400/20 to-sky-400/20 flex items-center justify-center text-xs font-bold text-white">
-                          {r.author.split(' ').map(n => n[0]).join('')}
-                        </div>
-                        <div>
-                          <span className="text-sm font-medium text-white flex items-center gap-1">
-                            {r.author}
-                            {r.verified && <Shield className="w-3 h-3 text-eden-400" />}
-                          </span>
-                          <span className="text-xs text-gray-500">{r.date}</span>
-                        </div>
-                      </div>
-                      <div className="flex gap-0.5">
-                        {Array.from({ length: r.rating }).map((_, j) => (
-                          <Star key={j} className="w-3.5 h-3.5 text-eden-400 fill-eden-400" />
-                        ))}
-                      </div>
-                    </div>
-                    <p className="text-sm text-gray-400 leading-relaxed">{r.comment}</p>
+
+              {/* Review form */}
+              {showReviewForm && (
+                <div className="mb-6 p-4 bg-white/[0.02] rounded-xl space-y-3">
+                  <div className="flex items-center gap-1">
+                    {[1,2,3,4,5].map(s => (
+                      <button key={s} onClick={() => setReviewRating(s)}>
+                        <Star className={`w-6 h-6 ${s <= reviewRating ? 'text-eden-400 fill-eden-400' : 'text-gray-600'}`} />
+                      </button>
+                    ))}
                   </div>
-                ))}
-              </div>
+                  <textarea value={reviewComment} onChange={e => setReviewComment(e.target.value)} placeholder="Share your experience..." rows={3} className="input-field resize-none" />
+                  <div className="flex gap-2">
+                    <button onClick={submitReview} disabled={sendingReview} className="btn-primary text-sm">
+                      {sendingReview ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Submit Review'}
+                    </button>
+                    <button onClick={() => setShowReviewForm(false)} className="btn-ghost text-sm">Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {reviews.length > 0 ? (
+                <div className="space-y-5">
+                  {reviews.map((r, i) => (
+                    <div key={r.id} className={`${i > 0 ? 'pt-5 border-t border-white/[0.04]' : ''}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-eden-400/20 flex items-center justify-center text-xs font-bold text-white overflow-hidden">
+                            {r.profiles?.avatar_url ? <img src={r.profiles.avatar_url} alt="" className="w-full h-full object-cover" /> : (r.profiles?.display_name || '?')[0]}
+                          </div>
+                          <div>
+                            <span className="text-sm font-medium text-white">{r.profiles?.display_name}</span>
+                            <span className="text-xs text-gray-500 ml-2">{new Date(r.created_at).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                        <div className="flex gap-0.5">{Array.from({ length: r.rating }).map((_, j) => <Star key={j} className="w-3.5 h-3.5 text-eden-400 fill-eden-400" />)}</div>
+                      </div>
+                      {r.comment && <p className="text-sm text-gray-400 leading-relaxed">{r.comment}</p>}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-sm">No reviews yet. Be the first to leave one.</p>
+              )}
             </div>
           </div>
 
           {/* Sidebar */}
           <div className="space-y-4">
-            {/* Request Card */}
+            {/* Action card */}
             <div className="card-glass p-6 sticky top-24">
-              <div className="text-center mb-6">
-                <div className="text-sm text-gray-500 mb-1">Exchange Type</div>
-                <div className="text-xl font-display text-white">Work Exchange</div>
-                <div className="text-sm text-gray-500 mt-1">20 hrs/week · Room & board included</div>
-              </div>
-              <button
-                onClick={() => setShowRequestModal(true)}
-                className="btn-primary w-full text-base mb-3 flex items-center justify-center gap-2"
-              >
-                Request to Join
-                <ArrowLeft className="w-4 h-4 rotate-180" />
-              </button>
+              {listing.price_amount ? (
+                <div className="text-center mb-6">
+                  <div className="text-3xl font-display text-white">${listing.price_amount}</div>
+                  <div className="text-sm text-gray-500">{listing.price_interval || 'one-time'}</div>
+                </div>
+              ) : (
+                <div className="text-center mb-6">
+                  <div className="text-xl font-display text-white capitalize">{(listing.exchange_type || 'flexible').replace('_', ' ')}</div>
+                </div>
+              )}
+
+              {!isOwner && user && !requestSent ? (
+                <button onClick={() => setShowRequest(true)} className="btn-primary w-full text-base mb-3 flex items-center justify-center gap-2">
+                  Request to Join <Send className="w-4 h-4" />
+                </button>
+              ) : requestSent ? (
+                <div className="w-full text-center py-3 bg-eden-500/10 text-eden-400 rounded-xl mb-3 text-sm flex items-center justify-center gap-2">
+                  <CheckCircle className="w-4 h-4" /> Request Sent
+                </div>
+              ) : isOwner ? (
+                <Link href={`/listings/new`} className="btn-secondary w-full text-center mb-3 block">Edit Listing</Link>
+              ) : (
+                <Link href="/login" className="btn-primary w-full text-center mb-3 block">Sign in to Request</Link>
+              )}
+
+              {!isOwner && user && (
+                <button onClick={messageHost} className="btn-secondary w-full mb-3 flex items-center justify-center gap-2">
+                  <MessageSquare className="w-4 h-4" /> Message Host
+                </button>
+              )}
+
               <div className="flex gap-2">
-                <button onClick={() => setSaved(!saved)} className={`btn-secondary flex-1 flex items-center justify-center gap-2 text-sm ${saved ? 'text-red-400' : ''}`}>
+                <button onClick={toggleSave} className={`btn-secondary flex-1 flex items-center justify-center gap-2 text-sm ${saved ? 'text-red-400' : ''}`}>
                   <Heart className={`w-4 h-4 ${saved ? 'fill-red-400' : ''}`} /> {saved ? 'Saved' : 'Save'}
                 </button>
                 <button className="btn-secondary flex-1 flex items-center justify-center gap-2 text-sm">
                   <Share2 className="w-4 h-4" /> Share
                 </button>
               </div>
-              <div className="mt-4 pt-4 border-t border-white/[0.04] flex items-center gap-2 text-xs text-gray-500">
-                <Flag className="w-3 h-3" />
-                <button className="hover:text-white transition-colors">Report this listing</button>
-              </div>
-            </div>
 
-            {/* Host Card */}
-            <div className="card-glass p-6">
-              <h3 className="text-sm font-medium text-gray-500 mb-4">Your Host</h3>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-eden-400 to-sky-400 flex items-center justify-center text-lg font-bold text-white">
-                  SM
-                </div>
-                <div>
-                  <div className="font-semibold text-white flex items-center gap-1.5">
-                    {LISTING.creator.name}
-                    <Shield className="w-4 h-4 text-eden-400" />
+              <div className="mt-4 pt-4 border-t border-white/[0.04]">
+                <button onClick={() => setShowReport(!showReport)} className="flex items-center gap-2 text-xs text-gray-500 hover:text-white">
+                  <Flag className="w-3 h-3" /> Report this listing
+                </button>
+                {showReport && (
+                  <div className="mt-3 space-y-2">
+                    <textarea value={reportMsg} onChange={e => setReportMsg(e.target.value)} placeholder="What's wrong with this listing?" rows={2} className="input-field text-sm resize-none" />
+                    <button onClick={submitReport} disabled={!reportMsg} className="btn-primary text-xs w-full py-2">Submit Report</button>
                   </div>
-                  <div className="text-xs text-gray-500">Member since {LISTING.creator.joinedYear}</div>
-                </div>
+                )}
               </div>
-              <div className="grid grid-cols-3 gap-3 mb-4">
-                <div className="text-center">
-                  <div className="text-lg font-display text-white">{LISTING.creator.trustScore}</div>
-                  <div className="text-[10px] text-gray-500">Trust Score</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-lg font-display text-white">{LISTING.creator.responseRate}%</div>
-                  <div className="text-[10px] text-gray-500">Response</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-lg font-display text-white">{LISTING.creator.responseTime}h</div>
-                  <div className="text-[10px] text-gray-500">Avg Reply</div>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1.5 mb-4">
-                {LISTING.creator.badges.map((b) => (
-                  <span key={b} className="badge-verified text-[10px]">
-                    <CheckCircle className="w-3 h-3" />
-                    {b.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase())}
-                  </span>
-                ))}
-              </div>
-              <button className="btn-secondary w-full text-sm flex items-center justify-center gap-2">
-                <MessageSquare className="w-4 h-4" /> Message Host
-              </button>
             </div>
 
-            {/* Community Card */}
-            <Link href={`/communities/${LISTING.community.slug}`} className="card-glass-hover p-5 flex items-center gap-3 group block">
-              <div className="w-10 h-10 rounded-xl bg-eden-500/10 flex items-center justify-center">
-                <Users className="w-5 h-5 text-eden-400" />
+            {/* Host card */}
+            {creator && (
+              <div className="card-glass p-6">
+                <h3 className="text-sm font-medium text-gray-500 mb-4">Your Host</h3>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-eden-400 to-sky-400 flex items-center justify-center text-lg font-bold text-white overflow-hidden">
+                    {creator.avatar_url ? <img src={creator.avatar_url} alt="" className="w-full h-full object-cover" /> : (creator.display_name || 'U')[0]}
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white flex items-center gap-1.5">{creator.display_name}<Shield className="w-4 h-4 text-eden-400" /></div>
+                    <div className="text-xs text-gray-500">Joined {new Date(creator.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="text-center"><div className="text-lg font-display text-white">{(creator.trust_score || 0).toFixed(1)}</div><div className="text-[10px] text-gray-500">Trust</div></div>
+                  <div className="text-center"><div className="text-lg font-display text-white">{creator.response_rate || 0}%</div><div className="text-[10px] text-gray-500">Response</div></div>
+                </div>
+                {creator.bio && <p className="text-xs text-gray-400 leading-relaxed mb-4">{creator.bio}</p>}
+                {!isOwner && user && (
+                  <button onClick={messageHost} className="btn-secondary w-full text-sm flex items-center justify-center gap-2">
+                    <MessageSquare className="w-4 h-4" /> Message
+                  </button>
+                )}
               </div>
-              <div className="flex-1">
-                <div className="text-sm font-medium text-white group-hover:text-eden-400 transition-colors">{LISTING.community.name}</div>
-                <div className="text-xs text-gray-500">{LISTING.community.members} members</div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-600 group-hover:text-eden-400" />
-            </Link>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Request Modal */}
+      {showRequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowRequest(false)}>
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} onClick={e => e.stopPropagation()} className="card-glass p-6 w-full max-w-md">
+            <h2 className="text-xl font-display text-white mb-2">Send a Request</h2>
+            <p className="text-gray-400 text-sm mb-6">Introduce yourself and explain why you&apos;re interested in &quot;{listing.title}&quot;</p>
+            <textarea value={requestMsg} onChange={e => setRequestMsg(e.target.value)} placeholder="Hi! I'm interested in your listing because..." rows={4} className="input-field resize-none mb-4" />
+            <div className="flex gap-3">
+              <button onClick={sendRequest} disabled={sendingRequest} className="btn-primary flex-1 flex items-center justify-center gap-2">
+                {sendingRequest ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <><Send className="w-4 h-4" /> Send Request</>}
+              </button>
+              <button onClick={() => setShowRequest(false)} className="btn-secondary">Cancel</button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
