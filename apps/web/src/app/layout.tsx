@@ -1,10 +1,9 @@
 import type { Metadata } from 'next';
 import '../styles/globals.css';
-import Navbar from './components/shared/Navbar';
-import { AuthProvider } from '../lib/auth-context';
+import { AuthProvider } from '@/lib/auth-context';
 
 export const metadata: Metadata = {
-  title: 'EdenShare — Connect Communities, Share Land, Build Together',
+  title: 'EdenShare — Share Land, Grow Together',
   description: 'A global network connecting communities, landowners, and seekers.',
 };
 
@@ -13,7 +12,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className="dark">
       <body className="min-h-screen antialiased">
         <AuthProvider>
-          <Navbar />
           {children}
         </AuthProvider>
       </body>

@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 import { Globe, Map, List, Search, Filter, MapPin, Users, Leaf, Wrench, ChevronRight, Eye } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
-const EarthGlobe = dynamic(() => import('../components/globe/EarthGlobe'), {
+const EarthGlobe = dynamic(() => import('@/components/globe/EarthGlobe'), {
   ssr: false,
   loading: () => <div className="w-full h-full flex items-center justify-center bg-eden-950"><div className="animate-pulse text-eden-400">Loading Globe...</div></div>,
 });

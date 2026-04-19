@@ -9,7 +9,7 @@ import {
   TreePine, Sprout, HandHeart, Award
 } from 'lucide-react';
 
-const EarthGlobe = dynamic(() => import('./components/globe/EarthGlobe'), {
+const EarthGlobe = dynamic(() => import('@/components/globe/EarthGlobe'), {
   ssr: false,
   loading: () => (
     <div className="w-full h-full flex items-center justify-center">
