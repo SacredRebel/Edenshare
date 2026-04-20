@@ -66,3 +66,64 @@ CREATE POLICY "Auth users can request to join" ON community_join_requests FOR IN
 CREATE POLICY "Community owners can manage" ON community_join_requests FOR UPDATE USING (
   community_id IN (SELECT id FROM communities WHERE owner_id = auth.uid())
 );
+
+-- ═══════════════════════════════════════════════════════════════════
+-- ANNOUNCEMENTS TABLE
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS announcements (
+  id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  community_id uuid REFERENCES communities(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  content text,
+  is_pinned boolean DEFAULT false,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE announcements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Anyone can read announcements" ON announcements FOR SELECT USING (true);
+CREATE POLICY "Community owners can manage announcements" ON announcements FOR ALL USING (
+  community_id IN (SELECT id FROM communities WHERE owner_id = auth.uid())
+);
+
+-- ═══════════════════════════════════════════════════════════════════
+-- ONBOARDING FLAG
+-- ═══════════════════════════════════════════════════════════════════
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_completed boolean DEFAULT false;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- TRUST SCORE AUTO-RECALCULATION ON REVIEW
+-- ═══════════════════════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION recalculate_trust_score()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE profiles SET trust_score = (
+    SELECT COALESCE(AVG(rating), 0) FROM reviews WHERE subject_id = NEW.subject_id
+  ) WHERE id = NEW.subject_id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_recalculate_trust ON reviews;
+CREATE TRIGGER trigger_recalculate_trust
+  AFTER INSERT OR UPDATE ON reviews
+  FOR EACH ROW EXECUTE FUNCTION recalculate_trust_score();
+
+-- ═══════════════════════════════════════════════════════════════════
+-- REPORTS TABLE
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS reports (
+  id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  reporter_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  reported_user_id uuid REFERENCES profiles(id),
+  reported_listing_id uuid REFERENCES listings(id),
+  type text DEFAULT 'listing' CHECK (type IN ('listing', 'user', 'community', 'message')),
+  reason text,
+  message text,
+  status text DEFAULT 'pending' CHECK (status IN ('pending', 'under_review', 'resolved', 'dismissed')),
+  resolved_at timestamptz,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can create reports" ON reports FOR INSERT WITH CHECK (auth.uid() = reporter_id);
+CREATE POLICY "Users see own reports" ON reports FOR SELECT USING (auth.uid() = reporter_id);

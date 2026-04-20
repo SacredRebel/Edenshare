@@ -21,6 +21,7 @@ export default function ListingDetailPage() {
   const [listing, setListing] = useState<any>(null);
   const [creator, setCreator] = useState<any>(null);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [similar, setSimilar] = useState<any[]>([]);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [imageIdx, setImageIdx] = useState(0);
@@ -47,6 +48,11 @@ export default function ListingDetailPage() {
 
     const { data: r } = await supabase.from('reviews').select('*, profiles!reviews_author_id_fkey(display_name, avatar_url)').eq('listing_id', id).order('created_at', { ascending: false });
     setReviews(r || []);
+
+    // Similar listings (same type, different listing)
+    const { data: sim } = await supabase.from('listings').select('id, title, type, images, city, price_amount, exchange_type')
+      .eq('type', l.type).eq('status', 'active').neq('id', id as string).limit(4);
+    setSimilar(sim || []);
 
     if (user) {
       const { data: s } = await supabase.from('saved_listings').select('id').eq('user_id', user.id).eq('listing_id', id as string).maybeSingle();
@@ -291,6 +297,30 @@ export default function ListingDetailPage() {
             <p className="text-sm text-gray-500 text-center py-6">No reviews yet</p>
           )}
         </div>
+
+        {/* Similar Listings */}
+        {similar.length > 0 && (
+          <div>
+            <h2 className="text-base font-semibold text-white mb-3">Similar Listings</h2>
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+              {similar.map(sl => (
+                <Link key={sl.id} href={`/listings/${sl.id}`}
+                  className="flex-shrink-0 w-40 bg-white/[0.03] border border-white/[0.06] rounded-xl overflow-hidden active:bg-white/[0.06]">
+                  <div className="aspect-square bg-[#0f2318]">
+                    {sl.images?.[0] ? <img src={sl.images[0]} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><Leaf className="w-6 h-6 text-eden-800/30" /></div>}
+                  </div>
+                  <div className="p-2.5">
+                    <p className="text-xs font-medium text-white line-clamp-1">{sl.title}</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">
+                      {sl.price_amount ? `$${sl.price_amount}` : (sl.exchange_type || 'Flexible').replace('_', ' ')}
+                      {sl.city ? ` · ${sl.city}` : ''}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Report */}
         <div className="pt-2">
