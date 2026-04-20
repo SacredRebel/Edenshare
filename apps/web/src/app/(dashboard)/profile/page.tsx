@@ -60,13 +60,31 @@ export default function ProfilePage() {
     await refreshProfile();
   };
 
+  const uploadCover = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    const path = `${user.id}/cover.${file.name.split('.').pop()}`;
+    await supabase.storage.from('avatars').upload(path, file, { upsert: true });
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    await supabase.from('profiles').update({ cover_url: data.publicUrl + '?t=' + Date.now() }).eq('id', user.id);
+    await refreshProfile();
+  };
+
   if (!profile) return null;
 
   return (
     <div className="max-w-2xl mx-auto">
       {/* Header */}
       <div className="relative">
-        <div className="h-32 bg-gradient-to-br from-eden-800/30 via-eden-900/40 to-sky-900/20" />
+        <label className="cursor-pointer block">
+          <div className="h-32 bg-gradient-to-br from-eden-800/30 via-eden-900/40 to-sky-900/20 relative overflow-hidden group">
+            {profile.cover_url && <img src={profile.cover_url} alt="" className="w-full h-full object-cover" />}
+            <div className="absolute inset-0 bg-black/0 group-active:bg-black/30 flex items-center justify-center transition-colors">
+              <Camera className="w-6 h-6 text-white/0 group-active:text-white/70" />
+            </div>
+          </div>
+          <input type="file" accept="image/*" onChange={uploadCover} className="hidden" />
+        </label>
         <div className="px-4 -mt-12 flex items-end gap-4">
           <div className="relative">
             <div className="w-24 h-24 rounded-2xl bg-eden-500/30 border-4 border-[#0a1a10] flex items-center justify-center text-3xl font-bold text-white overflow-hidden shadow-xl">

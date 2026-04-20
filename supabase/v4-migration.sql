@@ -127,3 +127,21 @@ CREATE TABLE IF NOT EXISTS reports (
 ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can create reports" ON reports FOR INSERT WITH CHECK (auth.uid() = reporter_id);
 CREATE POLICY "Users see own reports" ON reports FOR SELECT USING (auth.uid() = reporter_id);
+
+-- ═══════════════════════════════════════════════════════════════════
+-- MESSAGE ENHANCEMENTS (read receipts, image attachments)
+-- ═══════════════════════════════════════════════════════════════════
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_read boolean DEFAULT false;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS image_url text;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- PROFILE COVER PHOTO
+-- ═══════════════════════════════════════════════════════════════════
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS cover_url text;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- STORAGE BUCKETS (run these manually if they don't exist)
+-- ═══════════════════════════════════════════════════════════════════
+-- INSERT INTO storage.buckets (id, name, public) VALUES ('chat-images', 'chat-images', true) ON CONFLICT DO NOTHING;
+-- INSERT INTO storage.buckets (id, name, public) VALUES ('listing-images', 'listing-images', true) ON CONFLICT DO NOTHING;
+-- INSERT INTO storage.buckets (id, name, public) VALUES ('community-assets', 'community-assets', true) ON CONFLICT DO NOTHING;

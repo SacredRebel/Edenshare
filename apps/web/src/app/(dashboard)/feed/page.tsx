@@ -77,6 +77,10 @@ export default function FeedPage() {
   const [communities, setCommunities] = useState<any[]>([]);
   const [recommended, setRecommended] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     if (!user) return;
@@ -91,7 +95,7 @@ export default function FeedPage() {
       .eq('status', 'active')
       .neq('creator_id', user!.id)
       .order('created_at', { ascending: false })
-      .limit(10);
+      .range(0, PAGE_SIZE - 1);
 
     // User's communities
     const { data: memberOf } = await supabase
@@ -110,9 +114,31 @@ export default function FeedPage() {
       .limit(6);
 
     setNearbyListings(nearby || []);
+    setHasMore((nearby || []).length >= PAGE_SIZE);
     setCommunities((memberOf || []).map((m: any) => m.communities).filter(Boolean));
     setRecommended(rec || []);
     setLoading(false);
+  };
+
+  const loadMore = async () => {
+    if (loadingMore || !hasMore || !user) return;
+    setLoadingMore(true);
+    const nextPage = page + 1;
+    const { data } = await supabase
+      .from('listings')
+      .select('*, profiles!listings_creator_id_fkey(display_name, avatar_url)')
+      .eq('status', 'active')
+      .neq('creator_id', user.id)
+      .order('created_at', { ascending: false })
+      .range(nextPage * PAGE_SIZE, (nextPage + 1) * PAGE_SIZE - 1);
+    if (data && data.length > 0) {
+      setNearbyListings(prev => [...prev, ...data]);
+      setPage(nextPage);
+      setHasMore(data.length >= PAGE_SIZE);
+    } else {
+      setHasMore(false);
+    }
+    setLoadingMore(false);
   };
 
   if (loading) {
@@ -202,6 +228,16 @@ export default function FeedPage() {
           </div>
         )}
       </div>
+
+      {/* Load More */}
+      {hasMore && nearbyListings.length > 0 && (
+        <div className="px-4 mb-6 text-center">
+          <button onClick={loadMore} disabled={loadingMore}
+            className="btn-secondary text-sm py-2.5 w-full max-w-xs mx-auto flex items-center justify-center gap-2">
+            {loadingMore ? <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : 'Load More'}
+          </button>
+        </div>
+      )}
 
       {/* Recommended */}
       {recommended.length > 0 && (
